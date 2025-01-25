@@ -14,3 +14,11 @@ https://github.com/allfoxwy/UnitXP_SP3/issues/8
 
 ### Commands
 /mageplates or /mp will display commands for toggling Arcane Explosion, Frost Nova, and Cone of Cold tracking.
+
+## Preview
+
+![Arcane Explosion](https://imgur.com/noyHZ00.jpg "Arcane Explosion Preview") 
+
+![Frost Nova and Cone of Cold No CD](https://imgur.com/PnRBhL4.jpg "No CD FN / COC")
+
+![Frost Nova and Cone of Cold CD](https://imgur.com/7i3HlJf.jpg "CD FN / COC")
