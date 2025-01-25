@@ -1,7 +1,7 @@
 ## REQUIRES SUPERWOW AND UNITXP
 
 ### Test build -- Based on using UnitXP new AOE function, see opened issue below:
-https://github.com/allfoxwy/UnitXP_SP3/issues/8
+https://github.com/allfoxwy/UnitXP_SP3/issues/8#issuecomment-2610847751
 
 ## Mageplates v1
 - Adds Arcane Explosion icon to enemy nameplates that are within distance of arcane explosion around you
