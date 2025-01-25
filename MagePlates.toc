@@ -1,0 +1,8 @@
+## Interface: 11200
+## Title: MagePlates
+## Notes: Displays an Arcane Explosion icon on nameplates if within 10 yards
+## Author: QuadCrown
+## Version: 1.0
+## SavedVariables: MagePlatesDB
+
+MagePlates.lua
