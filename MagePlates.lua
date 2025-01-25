@@ -25,8 +25,8 @@ local coneColdEndTime  = 0
 ------------------------------------------------
 local MagePlates_Defaults = {
   enableAE  = true,  -- Arcane Explosion (10 yds)
-  enableFN  = true,  -- Frost Nova (12 yds, static cd)
-  enableCoC = true,  -- Cone of Cold (12 yds, static cd)
+  enableFN  = false,  -- Frost Nova (12 yds, static cd)
+  enableCoC = false,  -- Cone of Cold (12 yds, static cd)
 }
 
 ------------------------------------------------
