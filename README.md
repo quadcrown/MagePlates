@@ -13,8 +13,8 @@ https://github.com/allfoxwy/UnitXP_SP3/issues/8#issuecomment-2610847751
 - Added Frost Nova and Cone of Cold support with cooldown tracking. Will display frost nova and cone of cold icons when within 12 yards and if they are off cooldown. If not off cooldown, they will not show. When they are within 3 seconds of coming off cooldown, they will display with a counter.
 - Movement detection for adjusting icon indicators when moving (adds 2.5 leeway, as moving in vanilla makes AOE spells have a larger range)
 - 2.5 yard leeway where the plates have a 30% opacity whenever they are within the leeway distance. Example for Arcane Explosion: If within 12.5 yards, it will show an indicator that is 30% opacity versus when you are within 10 yards, it will be 100% opacity.
-- Added talent detection for frost spells (Artic Reach)
-- Added Set bonus detection for netherwind set to increase arcane explosion radius by 2.5 yards
+- Added talent detection for frost spells (Artic Reach) **1/26/25**
+- Added Set bonus detection for netherwind set to increase arcane explosion radius by 2.5 yards **1/26/25**
 
 ### Commands
 /mageplates or /mp will display commands for toggling Arcane Explosion, Frost Nova, and Cone of Cold tracking.
