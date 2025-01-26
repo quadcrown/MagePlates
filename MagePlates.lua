@@ -1,18 +1,36 @@
 -- MagePlates.lua
--- Shows Arcane Explosion (range check only), Frost Nova, and Cone of Cold icons on nameplates.
--- Frost Nova & Cone of Cold use a static cooldown approach based on combat log events.
---
--- Now also tracks player movement via UnitPosition("player"):
---   If moving, add +2 yards to the normal ranges (AE=10→12, FN/CoC=12→14)
---   If NOT moving, we show partial transparency (50%) if the unit is in that +2 yard leeway zone.
+-- Mage nameplate addon for vanilla 1.12 with:
+-- - Arcane Explosion netherwind set detection (3+ pieces => +2.5 yard range)
+-- - Frost Nova/CoC + Arctic Reach detection
+-- - Movement leeway + static cooldown approach
+-- - pfUI or default nameplates hooking
 
 ------------------------------------------------
--- 0) Movement & CD Settings
+-- 0) Settings & Tables
 ------------------------------------------------
-local FROST_NOVA_CD = 25  -- example rank 4 Frost Nova in vanilla
-local CONE_COLD_CD  = 10  -- example rank 5 Cone of Cold in vanilla
 
--- We'll store the "end time" of each cooldown:
+-- Frost Nova / CoC cooldown durations
+local FROST_NOVA_CD = 25
+local CONE_COLD_CD  = 10
+
+-- Talent: Arctic Reach => +1 yard per rank for Nova/CoC
+local arcticReachRank = 0
+
+-- Netherwind set itemIDs. If wearing >=3 => netherwindSetActive = true
+local NetherwindItemIDs = {
+  [16914] = true, -- Head
+  [16917] = true, -- Shoulders
+  [16916] = true, -- Chest
+  [16913] = true, -- Gloves
+  [16918] = true, -- Wrist
+  [16818] = true, -- Belt (verify if correct)
+  [16912] = true, -- Boots
+  [16915] = true, -- Pants
+}
+
+local netherwindSetActive = false
+
+-- We'll store end times for static CDs
 local frostNovaEndTime = 0
 local coneColdEndTime  = 0
 
@@ -21,12 +39,12 @@ local isMoving = false
 local lastPlayerX, lastPlayerY = 0, 0
 
 ------------------------------------------------
--- 1) SavedVars Defaults
+-- 1) Saved Variables & Defaults
 ------------------------------------------------
 local MagePlates_Defaults = {
-  enableAE  = true,  -- Arcane Explosion
-  enableFN  = true,  -- Frost Nova
-  enableCoC = true,  -- Cone of Cold
+  enableAE  = true, -- Arcane Explosion
+  enableFN  = true, -- Frost Nova
+  enableCoC = true, -- Cone of Cold
 }
 
 ------------------------------------------------
@@ -40,50 +58,50 @@ local function MagePlates_SlashCommand(msg)
 
   if msg == "aeon" then
     MagePlatesDB.enableAE = true
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion icon: ENABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion: ENABLED.")
     return
   elseif msg == "aeoff" then
     MagePlatesDB.enableAE = false
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion icon: DISABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion: DISABLED.")
     return
   end
 
   if msg == "fnon" then
     MagePlatesDB.enableFN = true
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Frost Nova icon: ENABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Frost Nova: ENABLED.")
     return
   elseif msg == "fnoff" then
     MagePlatesDB.enableFN = false
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Frost Nova icon: DISABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Frost Nova: DISABLED.")
     return
   end
 
   if msg == "cocon" then
     MagePlatesDB.enableCoC = true
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Cone of Cold icon: ENABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Cone of Cold: ENABLED.")
     return
   elseif msg == "cocoff" then
     MagePlatesDB.enableCoC = false
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Cone of Cold icon: DISABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Cone of Cold: DISABLED.")
     return
   end
 
   if msg == "on" then
     MagePlatesDB.enableAE = true
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion icon: ENABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion: ENABLED.")
     return
   elseif msg == "off" then
     MagePlatesDB.enableAE = false
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion icon: DISABLED.")
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r Arcane Explosion: DISABLED.")
     return
   end
 
   if msg == "help" or msg == "" then
     DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r usage:")
     DEFAULT_CHAT_FRAME:AddMessage("  /mageplates on/off       -> Toggle Arcane Explosion only")
-    DEFAULT_CHAT_FRAME:AddMessage("  /mageplates aeon/aeoff   -> Toggle Arcane Explosion icon")
-    DEFAULT_CHAT_FRAME:AddMessage("  /mageplates fnon/fnoff   -> Toggle Frost Nova icon")
-    DEFAULT_CHAT_FRAME:AddMessage("  /mageplates cocon/cocoff -> Toggle Cone of Cold icon")
+    DEFAULT_CHAT_FRAME:AddMessage("  /mageplates aeon/aeoff   -> Toggle Arcane Explosion")
+    DEFAULT_CHAT_FRAME:AddMessage("  /mageplates fnon/fnoff   -> Toggle Frost Nova")
+    DEFAULT_CHAT_FRAME:AddMessage("  /mageplates cocon/cocoff -> Toggle Cone of Cold")
     DEFAULT_CHAT_FRAME:AddMessage("  /mageplates help         -> Show this help text")
     return
   end
@@ -96,139 +114,72 @@ SLASH_MAGEPLATES2 = "/mp"
 SlashCmdList["MAGEPLATES"] = MagePlates_SlashCommand
 
 ------------------------------------------------
--- 3) Range Checking + Movement Leeway
+-- 3) Talent: Arctic Reach
 ------------------------------------------------
--- We still call UnitXP("distanceBetween","player",unit,"AoE") to get distance.
--- If isMoving=true, we add +2 yards to the normal range for a full "hit".
--- If NOT moving, we allow the same +2 yards in a partial zone, but show 50% alpha.
-
--- Normal ranges
-local AE_RANGE  = 10
-local FN_RANGE  = 12
-local CoC_RANGE = 12
-
--- We'll return "alpha" to indicate how visible the icon should be, or 0 if it's out of range and should be hidden.
-local function GetRangeAlphaForSpell(unit, spellName)
-  if not UnitExists(unit) then
-    return 0
-  end
-
-  local dist = UnitXP("distanceBetween", "player", unit, "AoE")
-  if not dist then
-    return 0
-  end
-
-  -- Decide the base normalRange
-  local normalRange = 0
-  if spellName == "AE" then
-    normalRange = AE_RANGE
-  elseif spellName == "FrostNova" then
-    normalRange = FN_RANGE
-  elseif spellName == "ConeOfCold" then
-    normalRange = CoC_RANGE
-  end
-
-  -- If moving => we treat normalRange+2 as the 'full' range
-  if isMoving then
-    if dist <= (normalRange + 2.5) then
-      return 1.0 -- fully visible
-    else
-      return 0   -- hide
-    end
+local function UpdateArcticReachRank()
+  local name, _, _, _, rank, _ = GetTalentInfo(3, 11)  -- Frost tab=3, talent=11
+  if rank then
+    arcticReachRank = rank
   else
-    -- Not moving => normal range is full alpha, extended range is half alpha
-    if dist <= normalRange then
-      return 1.0
-    elseif dist <= (normalRange + 2.5) then
-      return 0.3
-    else
-      return 0
+    arcticReachRank = 0
+  end
+end
+
+------------------------------------------------
+-- 4) Netherwind Set Detection
+------------------------------------------------
+-- Old vanilla 1.12: we parse itemlinks with string.find capture.
+
+local function ExtractItemIDFromLink(itemLink)
+  if not itemLink then return nil end
+  -- string.find returns s,e,"capture" in Lua 5.0
+  local s, e, capturedID = string.find(itemLink, "Hitem:(%d+)")
+  if capturedID then
+    return tonumber(capturedID)
+  end
+  return nil
+end
+
+local function ScanForNetherwind()
+  local count = 0
+  local slots = {
+    "HeadSlot", "NeckSlot", "ShoulderSlot", "BackSlot",
+    "ChestSlot", "ShirtSlot", "TabardSlot", "WristSlot",
+    "HandsSlot", "WaistSlot", "LegsSlot", "FeetSlot",
+    "Finger0Slot", "Finger1Slot", "Trinket0Slot", "Trinket1Slot",
+    "MainHandSlot", "SecondaryHandSlot", "RangedSlot", "AmmoSlot"
+  }
+
+  for _, slotName in pairs(slots) do
+    local slotID = GetInventorySlotInfo(slotName)
+    if slotID then
+      local itemLink = GetInventoryItemLink("player", slotID)
+      if itemLink then
+        local itemID = ExtractItemIDFromLink(itemLink)
+        if itemID and NetherwindItemIDs[itemID] then
+          count = count + 1
+        end
+      end
     end
   end
+
+  netherwindSetActive = (count >= 5)
 end
 
 ------------------------------------------------
--- 4) Static CD Tracking
+-- 5) Movement Detection
 ------------------------------------------------
-local SpellCDFrame = CreateFrame("Frame", "MagePlates_SpellCDFrame", UIParent)
-SpellCDFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
-SpellCDFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_BUFF")
-
-SpellCDFrame:SetScript("OnEvent", function()
-  local msg = arg1 or ""
-  -- Detect Frost Nova usage
-  if string.find(msg, "Your Frost Nova") then
-    frostNovaEndTime = GetTime() + FROST_NOVA_CD
-  end
-  -- Detect Cone of Cold usage
-  if string.find(msg, "Your Cone of Cold") then
-    coneColdEndTime = GetTime() + CONE_COLD_CD
-  end
-end)
-
--- Return how many seconds remain on the static CD for "FrostNova" or "ConeOfCold"
-local function GetStaticCooldownLeft(spell)
-  local now = GetTime()
-  if spell == "FrostNova" then
-    local left = frostNovaEndTime - now
-    return left > 0 and left or 0
-  elseif spell == "ConeOfCold" then
-    local left = coneColdEndTime - now
-    return left > 0 and left or 0
-  end
-  return 0
-end
-
-------------------------------------------------
--- 5) Icon Textures
-------------------------------------------------
-local AEIconTexture  = "Interface\\Icons\\Spell_Nature_WispSplode"
-local FNIconTexture  = "Interface\\Icons\\Spell_Frost_FrostNova"
-local CoCIconTexture = "Interface\\Icons\\Spell_Frost_Glacier"
-
-------------------------------------------------
--- 6) Icon Positioning
-------------------------------------------------
--- We have different Y offsets for pfUI vs. default plates, so we'll pass in offsetY.
-local ICON_SPACING = 30
-
-local function ArrangeIconsCentered(icons, parent, offsetY)
-  local n = table.getn(icons)  -- vanilla 1.12 => table.getn
-  if n == 0 then return end
-
-  for i = 1, n do
-    local data = icons[i]
-    local icon = data.icon
-    icon:ClearAllPoints()
-
-    local offsetX = (i - (n+1)/2) * ICON_SPACING
-    icon:SetPoint("TOP", parent, "TOP", offsetX, offsetY)
-
-    if data.timerFS then
-      data.timerFS:ClearAllPoints()
-      data.timerFS:SetPoint("CENTER", icon, "CENTER", 0, 0)
-    end
-  end
-end
-
-------------------------------------------------
--- 7) Movement Detection
-------------------------------------------------
--- We update "isMoving" once every 0.5 sec by comparing UnitPosition("player").
-local MovementCheckFrame = CreateFrame("Frame", "MagePlates_MovementFrame", UIParent)
-MovementCheckFrame.tick = 0
-MovementCheckFrame:SetScript("OnUpdate", function()
+local isMovingFrame = CreateFrame("Frame", "MagePlates_IsMovingFrame", UIParent)
+isMovingFrame.tick = 0
+isMovingFrame:SetScript("OnUpdate", function()
   if not this.tick then this.tick = 0 end
-  if this.tick > GetTime() then
-    return
-  end
-  this.tick = GetTime() + 0.05
+  if this.tick > GetTime() then return end
+  this.tick = GetTime() + 0.1
 
   local x, y = UnitPosition("player")
   if x and y then
     local dx = x - lastPlayerX
     local dy = y - lastPlayerY
-    -- If moved more than a tiny amount, consider the player 'moving'
     local distSq = dx*dx + dy*dy
     if distSq > 0.0001 then
       isMoving = true
@@ -240,7 +191,107 @@ MovementCheckFrame:SetScript("OnUpdate", function()
 end)
 
 ------------------------------------------------
--- 8) pfUI Nameplates
+-- 6) Range Logic
+------------------------------------------------
+local function GetRangeAlphaForSpell(unit, spellID)
+  if not UnitExists(unit) then
+    return 0
+  end
+  local dist = UnitXP("distanceBetween", "player", unit, "AoE")
+  if not dist then
+    return 0
+  end
+
+  local baseRange = 0
+  if spellID == "AE" then
+    baseRange = 10
+    if netherwindSetActive then
+      baseRange = baseRange + 2.5
+    end
+  elseif (spellID == "FrostNova") or (spellID == "ConeOfCold") then
+    baseRange = 10 + arcticReachRank
+  else
+    baseRange = 10
+  end
+
+  if isMoving then
+    if dist <= (baseRange + 2) then
+      return 1.0
+    else
+      return 0
+    end
+  else
+    if dist <= baseRange then
+      return 1.0
+    elseif dist <= (baseRange + 2) then
+      return 0.5
+    else
+      return 0
+    end
+  end
+end
+
+------------------------------------------------
+-- 7) Static CD for Nova/CoC
+------------------------------------------------
+local frostNovaEndTime = 0
+local coneColdEndTime  = 0
+
+local SpellCDFrame = CreateFrame("Frame", "MagePlates_SpellCDFrame", UIParent)
+SpellCDFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
+SpellCDFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_BUFF")
+
+SpellCDFrame:SetScript("OnEvent", function()
+  local msg = arg1 or ""
+  if string.find(msg, "Your Frost Nova") then
+    frostNovaEndTime = GetTime() + FROST_NOVA_CD
+  end
+  if string.find(msg, "Your Cone of Cold") then
+    coneColdEndTime = GetTime() + CONE_COLD_CD
+  end
+end)
+
+local function GetStaticCooldownLeft(spell)
+  local now = GetTime()
+  if spell == "FrostNova" then
+    local left = frostNovaEndTime - now
+    return (left > 0) and left or 0
+  elseif spell == "ConeOfCold" then
+    local left = coneColdEndTime - now
+    return (left > 0) and left or 0
+  end
+  return 0
+end
+
+------------------------------------------------
+-- 8) Icon Layout
+------------------------------------------------
+local AEIconTexture  = "Interface\\Icons\\Spell_Nature_WispSplode"
+local FNIconTexture  = "Interface\\Icons\\Spell_Frost_FrostNova"
+local CoCIconTexture = "Interface\\Icons\\Spell_Frost_Glacier"
+
+local ICON_SPACING = 30
+
+local function ArrangeIconsCentered(icons, parent, offsetY)
+  local n = table.getn(icons)
+  if n == 0 then return end
+
+  for i=1, n do
+    local data = icons[i]
+    local icon = data.icon
+    icon:ClearAllPoints()
+    local offsetX = (i - (n+1)/2) * ICON_SPACING
+    icon:SetPoint("TOP", parent, "TOP", offsetX, offsetY)
+
+    if data.timerFS then
+      data.timerFS:ClearAllPoints()
+      data.timerFS:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    end
+  end
+end
+
+------------------------------------------------
+-- 9) pfUI Nameplates
 ------------------------------------------------
 local function HookPfuiNameplates()
   if not pfUI or not pfUI.nameplates then return end
@@ -248,10 +299,10 @@ local function HookPfuiNameplates()
   local oldOnCreate = pfUI.nameplates.OnCreate
   pfUI.nameplates.OnCreate = function(frame)
     oldOnCreate(frame)
+
     local plate = frame.nameplate
     if not plate or not plate.health then return end
 
-    -- AE
     local aeIcon = plate.health:CreateTexture(nil, "OVERLAY")
     aeIcon:SetTexture(AEIconTexture)
     aeIcon:SetWidth(25)
@@ -259,7 +310,6 @@ local function HookPfuiNameplates()
     aeIcon:Hide()
     plate.aeIcon = aeIcon
 
-    -- Frost Nova
     local fnIcon = plate.health:CreateTexture(nil, "OVERLAY")
     fnIcon:SetTexture(FNIconTexture)
     fnIcon:SetWidth(25)
@@ -272,7 +322,6 @@ local function HookPfuiNameplates()
     fnTimer:Hide()
     plate.fnTimer = fnTimer
 
-    -- Cone of Cold
     local cocIcon = plate.health:CreateTexture(nil, "OVERLAY")
     cocIcon:SetTexture(CoCIconTexture)
     cocIcon:SetWidth(25)
@@ -295,10 +344,9 @@ local function HookPfuiNameplates()
 
     local guid = plate.parent:GetName(1)
     local unitToCheck = (guid and UnitExists(guid)) and guid or "target"
-
     local shown = {}
 
-    -- Arcane Explosion (no static CD)
+    -- Arcane Explosion
     if MagePlatesDB.enableAE then
       local alpha = GetRangeAlphaForSpell(unitToCheck, "AE")
       if alpha > 0 then
@@ -316,18 +364,15 @@ local function HookPfuiNameplates()
     if MagePlatesDB.enableFN then
       local fnLeft = GetStaticCooldownLeft("FrostNova")
       if fnLeft == 0 or fnLeft <= 3 then
-        -- Off CD or <=3 => possible show
         local alpha = GetRangeAlphaForSpell(unitToCheck, "FrostNova")
         if alpha > 0 then
           plate.fnIcon:SetAlpha(alpha)
-
           if fnLeft == 0 then
             plate.fnIcon:Show()
             plate.fnTimer:Hide()
             plate.fnTimer:SetText("")
             table.insert(shown, { icon = plate.fnIcon })
           else
-            -- <=3 => show a red timer
             plate.fnIcon:Show()
             plate.fnTimer:Show()
             plate.fnTimer:SetTextColor(1, 0, 0, 1)
@@ -340,7 +385,6 @@ local function HookPfuiNameplates()
           plate.fnTimer:SetText("")
         end
       else
-        -- More than 3 left => hide
         plate.fnIcon:Hide()
         plate.fnTimer:Hide()
         plate.fnTimer:SetText("")
@@ -358,7 +402,6 @@ local function HookPfuiNameplates()
         local alpha = GetRangeAlphaForSpell(unitToCheck, "ConeOfCold")
         if alpha > 0 then
           plate.cocIcon:SetAlpha(alpha)
-
           if cocLeft == 0 then
             plate.cocIcon:Show()
             plate.cocTimer:Hide()
@@ -387,13 +430,12 @@ local function HookPfuiNameplates()
       plate.cocTimer:SetText("")
     end
 
-    -- pfUI offset stays at 60
     ArrangeIconsCentered(shown, plate.health, 60)
   end
 end
 
 ------------------------------------------------
--- 9) Default Blizzard Nameplates
+-- 10) Default Blizzard Nameplates
 ------------------------------------------------
 local nameplateCache = {}
 
@@ -439,6 +481,7 @@ local function UpdateDefaultNameplates()
     if frame:IsVisible() and frame:GetName() == nil then
       local healthBar = frame:GetChildren()
       if healthBar and healthBar:IsObjectType("StatusBar") then
+
         if not nameplateCache[frame] then
           CreatePlateElements(frame)
         end
@@ -454,7 +497,7 @@ local function UpdateDefaultNameplates()
 
         local shown = {}
 
-        -- Arcane Explosion
+        -- AE
         if MagePlatesDB.enableAE then
           local alpha = GetRangeAlphaForSpell(unitToCheck, "AE")
           if alpha > 0 then
@@ -538,8 +581,7 @@ local function UpdateDefaultNameplates()
           cocTimer:SetText("")
         end
 
-        -- For default Blizzard plates, let's use offsetY=30
-        ArrangeIconsCentered(shown, frame, 30)
+        ArrangeIconsCentered(shown, frame, 30) -- offset=30
       end
     end
   end
@@ -557,9 +599,12 @@ local function HookDefaultNameplates()
 end
 
 ------------------------------------------------
--- 10) Deferred Hook Setup
+-- 11) Deferred Hook Setup
 ------------------------------------------------
 local function MagePlates_SetupHooks()
+  UpdateArcticReachRank()
+  ScanForNetherwind()
+
   if pfUI and pfUI.nameplates then
     HookPfuiNameplates()
   else
@@ -568,11 +613,18 @@ local function MagePlates_SetupHooks()
 end
 
 ------------------------------------------------
--- 11) Main Addon Frame & SavedVars
+-- 12) Main Addon Frame & Events
 ------------------------------------------------
 local MagePlatesFrame = CreateFrame("Frame", "MagePlates_MainFrame")
 MagePlatesFrame:RegisterEvent("VARIABLES_LOADED")
 MagePlatesFrame:RegisterEvent("PLAYER_LOGIN")
+
+-- Gear check triggers
+MagePlatesFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+MagePlatesFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
+
+-- Arctic Reach re-check
+MagePlatesFrame:RegisterEvent("CHARACTER_POINTS_CHANGED")
 
 MagePlatesFrame:SetScript("OnEvent", function()
   if event == "VARIABLES_LOADED" then
@@ -585,11 +637,26 @@ MagePlatesFrame:SetScript("OnEvent", function()
       end
     end
 
-    MagePlates_SetupHooks()
-    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r loaded. Type '/mageplates help' for options.")
-
   elseif event == "PLAYER_LOGIN" then
     local _, playerGUID = UnitExists("player")
     MagePlatesDB.playerGUID = playerGUID
+    UpdateArcticReachRank()
+    ScanForNetherwind()
+
+  elseif event == "PLAYER_ENTERING_WORLD" then
+    ScanForNetherwind()
+
+  elseif event == "UNIT_INVENTORY_CHANGED" then
+    if arg1 == "player" then
+      ScanForNetherwind()
+    end
+
+  elseif event == "CHARACTER_POINTS_CHANGED" then
+    UpdateArcticReachRank()
+  end
+
+  if event == "VARIABLES_LOADED" then
+    MagePlates_SetupHooks()
+    DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00[MagePlates]|r loaded. Type '/mageplates help' for options.")
   end
 end)
