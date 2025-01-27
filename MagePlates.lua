@@ -1,9 +1,10 @@
 -- MagePlates.lua
 -- Mage nameplate addon for vanilla 1.12 with:
--- - Arcane Explosion netherwind set detection (3+ pieces => +2.5 yard range)
--- - Frost Nova/CoC + Arctic Reach detection
--- - Movement leeway + static cooldown approach
--- - pfUI or default nameplates hooking
+--   - Arcane Explosion netherwind set detection (>=3 pieces => +2.5 yard range)
+--   - Frost Nova/CoC + Arctic Reach detection
+--   - Movement leeway + static cooldown approach
+--   - *New* filters: hide icons on friendly nameplates or critters
+--   - pfUI or default nameplates hooking
 
 ------------------------------------------------
 -- 0) Settings & Tables
@@ -16,7 +17,7 @@ local CONE_COLD_CD  = 10
 -- Talent: Arctic Reach => +1 yard per rank for Nova/CoC
 local arcticReachRank = 0
 
--- Netherwind set itemIDs. If wearing >=3 => netherwindSetActive = true
+-- Netherwind set itemIDs (>=3 => netherwindSetActive)
 local NetherwindItemIDs = {
   [16914] = true, -- Head
   [16917] = true, -- Shoulders
@@ -128,11 +129,8 @@ end
 ------------------------------------------------
 -- 4) Netherwind Set Detection
 ------------------------------------------------
--- Old vanilla 1.12: we parse itemlinks with string.find capture.
-
 local function ExtractItemIDFromLink(itemLink)
   if not itemLink then return nil end
-  -- string.find returns s,e,"capture" in Lua 5.0
   local s, e, capturedID = string.find(itemLink, "Hitem:(%d+)")
   if capturedID then
     return tonumber(capturedID)
@@ -174,7 +172,7 @@ isMovingFrame.tick = 0
 isMovingFrame:SetScript("OnUpdate", function()
   if not this.tick then this.tick = 0 end
   if this.tick > GetTime() then return end
-  this.tick = GetTime() + 0.1
+  this.tick = GetTime() + 0.5
 
   local x, y = UnitPosition("player")
   if x and y then
@@ -208,7 +206,7 @@ local function GetRangeAlphaForSpell(unit, spellID)
     if netherwindSetActive then
       baseRange = baseRange + 2.5
     end
-  elseif (spellID == "FrostNova") or (spellID == "ConeOfCold") then
+  elseif spellID == "FrostNova" or spellID == "ConeOfCold" then
     baseRange = 10 + arcticReachRank
   else
     baseRange = 10
@@ -234,9 +232,6 @@ end
 ------------------------------------------------
 -- 7) Static CD for Nova/CoC
 ------------------------------------------------
-local frostNovaEndTime = 0
-local coneColdEndTime  = 0
-
 local SpellCDFrame = CreateFrame("Frame", "MagePlates_SpellCDFrame", UIParent)
 SpellCDFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
 SpellCDFrame:RegisterEvent("CHAT_MSG_SPELL_SELF_BUFF")
@@ -303,6 +298,7 @@ local function HookPfuiNameplates()
     local plate = frame.nameplate
     if not plate or not plate.health then return end
 
+    -- Arcane Explosion
     local aeIcon = plate.health:CreateTexture(nil, "OVERLAY")
     aeIcon:SetTexture(AEIconTexture)
     aeIcon:SetWidth(25)
@@ -310,6 +306,7 @@ local function HookPfuiNameplates()
     aeIcon:Hide()
     plate.aeIcon = aeIcon
 
+    -- Frost Nova
     local fnIcon = plate.health:CreateTexture(nil, "OVERLAY")
     fnIcon:SetTexture(FNIconTexture)
     fnIcon:SetWidth(25)
@@ -322,6 +319,7 @@ local function HookPfuiNameplates()
     fnTimer:Hide()
     plate.fnTimer = fnTimer
 
+    -- Cone of Cold
     local cocIcon = plate.health:CreateTexture(nil, "OVERLAY")
     cocIcon:SetTexture(CoCIconTexture)
     cocIcon:SetWidth(25)
@@ -344,6 +342,28 @@ local function HookPfuiNameplates()
 
     local guid = plate.parent:GetName(1)
     local unitToCheck = (guid and UnitExists(guid)) and guid or "target"
+
+    ------------------------------------------------
+    --  Filter out friendly and critter
+    ------------------------------------------------
+    if UnitIsFriend("player", unitToCheck) then
+      plate.aeIcon:Hide()
+      plate.fnIcon:Hide()
+      plate.fnTimer:Hide()
+      plate.cocIcon:Hide()
+      plate.cocTimer:Hide()
+      return
+    end
+    local ctype = UnitCreatureType(unitToCheck)
+    if ctype == "Critter" then
+      plate.aeIcon:Hide()
+      plate.fnIcon:Hide()
+      plate.fnTimer:Hide()
+      plate.cocIcon:Hide()
+      plate.cocTimer:Hide()
+      return
+    end
+
     local shown = {}
 
     -- Arcane Explosion
@@ -495,9 +515,28 @@ local function UpdateDefaultNameplates()
         local guid = frame:GetName(1)
         local unitToCheck = (guid and guid ~= "0x0000000000000000" and UnitExists(guid)) and guid or "target"
 
+        ------------------------------------------------
+        -- Filter out friendly + critter
+        ------------------------------------------------
+        if UnitIsFriend("player", unitToCheck) then
+          aeIcon:Hide()
+          fnIcon:Hide()
+          fnTimer:Hide()
+          cocIcon:Hide()
+          cocTimer:Hide()
+        end
+        local ctype = UnitCreatureType(unitToCheck)
+        if ctype == "Critter" then
+          aeIcon:Hide()
+          fnIcon:Hide()
+          fnTimer:Hide()
+          cocIcon:Hide()
+          cocTimer:Hide()
+        end
+
         local shown = {}
 
-        -- AE
+        -- Arcane Explosion
         if MagePlatesDB.enableAE then
           local alpha = GetRangeAlphaForSpell(unitToCheck, "AE")
           if alpha > 0 then
