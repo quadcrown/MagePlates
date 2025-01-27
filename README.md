@@ -17,6 +17,7 @@ https://github.com/allfoxwy/UnitXP_SP3/releases/tag/v22
 - 2.5 yard leeway where the plates have a 30% opacity whenever they are within the leeway distance. Example for Arcane Explosion: If within 12.5 yards, it will show an indicator that is 30% opacity versus when you are within 10 yards, it will be 100% opacity.
 - Added talent detection for frost spells (Artic Reach) **1/26/25**
 - Added Set bonus detection for netherwind set to increase arcane explosion radius by 2.5 yards **1/26/25**
+- Friendly and critter nameplate filter **1/27/25**
 
 ### Commands
 /mageplates or /mp will display commands for toggling Arcane Explosion, Frost Nova, and Cone of Cold tracking.
